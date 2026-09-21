@@ -1,0 +1,187 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  background-color: #0f172a;
+  color: #f8fafc;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Barre de progression */
+#progress-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background-color: transparent;
+  z-index: 1000;
+}
+
+#progress-bar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #818cf8);
+  transition: width 0.2s ease;
+}
+
+/* En-tête du navigateur */
+.browser-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  background-color: #1e293b;
+  border-bottom: 1px solid #334155;
+}
+
+.brand-text {
+  font-weight: 800;
+  font-size: 1.2rem;
+  letter-spacing: 1px;
+}
+
+.plus {
+  color: #38bdf8;
+}
+
+#search-form {
+  display: flex;
+  flex: 1;
+  gap: 0.5rem;
+}
+
+#search-input {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background-color: #0f172a;
+  color: #fff;
+  outline: none;
+}
+
+#search-input:focus {
+  border-color: #38bdf8;
+}
+
+button {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  background-color: #38bdf8;
+  color: #0f172a;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+/* Animation infinie SAFARI + */
+#loader {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.95);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.loader-content {
+  text-align: center;
+}
+
+.compass-logo {
+  width: 70px;
+  height: 70px;
+  border: 4px solid #38bdf8;
+  border-radius: 50%;
+  margin: 0 auto 1.5rem;
+  position: relative;
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.needle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 35px;
+  background: linear-gradient(180deg, #ef4444 50%, #f8fafc 50%);
+  transform-origin: 50% 50%;
+  margin-top: -17.5px;
+  margin-left: -3px;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  animation: spin 1.2s infinite linear;
+}
+
+.infinite-text {
+  font-size: 2rem;
+  font-weight: 900;
+  background: linear-gradient(90deg, #38bdf8, #c084fc, #38bdf8);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shine 2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 15px rgba(56, 189, 248, 0.3); }
+  50% { transform: scale(1.1); box-shadow: 0 0 30px rgba(56, 189, 248, 0.7); }
+}
+
+@keyframes shine {
+  to { background-position: 200% center; }
+}
+
+/* Résultats */
+.results-container {
+  max-width: 800px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.result-card {
+  background-color: #1e293b;
+  padding: 1.2rem;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  border: 1px solid #334155;
+}
+
+.result-card a {
+  color: #38bdf8;
+  font-size: 1.2rem;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.result-card a:hover {
+  text-decoration: underline;
+}
+
+.result-card p {
+  color: #94a3b8;
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+}
+
+#web-frame {
+  width: 100%;
+  height: calc(100vh - 75px);
+  border: none;
+}
