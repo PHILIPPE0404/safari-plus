@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const cheerio = require('cheerio');
 const path = require('path');
 
 const app = express();
@@ -8,58 +7,60 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Affichage des requêtes dans les logs Render
 app.use((req, res, next) => {
   console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${req.method} ${req.url}`);
   next();
 });
 
-// Moteur de recherche optimisé via DuckDuckGo Lite (POST)
+// Recherche via l'API JSON de SearXNG (agrégateur Google/Bing insensible aux blocages cloud)
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
-  if (!query) {
-    console.log('[RECHERCHE] Requête vide');
-    return res.status(400).json({ error: 'Recherche vide' });
-  }
+  if (!query) return res.status(400).json({ error: 'Recherche vide' });
 
   console.log(`[RECHERCHE] Lancement pour : "${query}"`);
 
-  try {
-    const params = new URLSearchParams();
-    params.append('q', query);
+  // Liste d'instances publiques SearXNG pour basculer automatiquement en cas de lenteur
+  const instances = [
+    'https://searx.be/search',
+    'https://search.bus-hit.me/search',
+    'https://searx.space/search',
+    'https://searx.fyi/search'
+  ];
 
-    const response = await axios.post('https://lite.duckduckgo.com/lite/', params.toString(), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-      },
-      timeout: 12000
-    });
+  for (const instance of instances) {
+    try {
+      const response = await axios.get(instance, {
+        params: {
+          q: query,
+          format: 'json',
+          language: 'fr-FR'
+        },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 4000
+      });
 
-    const $ = cheerio.load(response.data);
-    const results = [];
+      if (response.data && response.data.results && response.data.results.length > 0) {
+        const results = response.data.results.slice(0, 10).map(item => ({
+          title: item.title,
+          link: item.url,
+          snippet: item.content || 'Aucune description disponible.'
+        }));
 
-    $('.result-snippet').each((i, element) => {
-      const snippet = $(element).text().trim();
-      const tr = $(element).closest('tr').prev();
-      const a = tr.find('a.result-link');
-      const title = a.text().trim();
-      const link = a.attr('href');
-
-      if (title && link) {
-        results.push({ title, link, snippet });
+        console.log(`[RECHERCHE SUCCESS] ${results.length} résultats récupérés via ${instance}`);
+        return res.json({ results });
       }
-    });
-
-    console.log(`[RECHERCHE SUCCESS] ${results.length} résultats trouvés`);
-    res.json({ results });
-  } catch (error) {
-    console.error(`[RECHERCHE ERROR] ${error.message}`);
-    res.status(500).json({ error: 'Le serveur de recherche n\'a pas répondu à temps.', details: error.message });
+    } catch (err) {
+      console.log(`[RECHERCHE WARNING] Instance ${instance} indisponible (${err.message}), tentative suivante...`);
+    }
   }
+
+  console.error('[RECHERCHE ERROR] Toutes les instances de recherche ont expiré.');
+  res.status(500).json({ error: 'Impossible d\'obtenir les résultats de recherche.' });
 });
 
-// Proxy pour afficher la page dans l'iframe
+// Proxy pour afficher les pages web dans l'iframe
 app.get('/api/proxy', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('URL manquante');
@@ -72,7 +73,7 @@ app.get('/api/proxy', async (req, res) => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
       responseType: 'text',
-      timeout: 12000
+      timeout: 10000
     });
 
     let html = response.data;
