@@ -38,7 +38,8 @@ app.get('/api/search', async (req, res) => {
 
     $('.result').each((i, element) => {
       const title = $(element).find('.result__title a').text().trim();
-      const link = $(element).find('.result__url').attr('href') \vert{}\vert{}$(element).find('.result__title a').attr('href');
+      // ✅ CORRECT
+      const link = $(element).find('.result__url').attr('href') || $(element).find('.result__title a').attr('href');
       const snippet = $(element).find('.result__snippet').text().trim();
 
       if (title && link) {
