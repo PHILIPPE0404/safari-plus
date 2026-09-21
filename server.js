@@ -8,28 +8,27 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Middleware de journalisation (logs Render)
+// Affichage des requêtes dans les logs Render
 app.use((req, res, next) => {
-  console.log(`[LOG ${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${req.method} ${req.url}`);
   next();
 });
 
-// API de recherche avec logs détaillés
+// Moteur de recherche côté serveur
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) {
-    console.log('[SEARCH WARNING] Requête vide reçue.');
+    console.log('[RECHERCHE] Requête vide');
     return res.status(400).json({ error: 'Recherche vide' });
   }
 
-  console.log(`[SEARCH] Recherche lancée pour : "${query}"`);
+  console.log(`[RECHERCHE] Lancement pour : "${query}"`);
 
   try {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const response = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       },
       timeout: 10000
     });
@@ -47,28 +46,25 @@ app.get('/api/search', async (req, res) => {
       }
     });
 
-    console.log(`[SEARCH SUCCESS] ${results.length} résultats trouvés pour "${query}".`);
+    console.log(`[RECHERCHE SUCCESS] ${results.length} résultats trouvés`);
     res.json({ results });
   } catch (error) {
-    console.error(`[SEARCH ERROR] Échec de la recherche : ${error.message}`);
-    res.status(500).json({ error: 'Erreur lors de la recherche.', details: error.message });
+    console.error(`[RECHERCHE ERROR] ${error.message}`);
+    res.status(500).json({ error: 'Erreur lors de la recherche', details: error.message });
   }
 });
 
-// Proxy avec injection de la balise <base> pour fixer les images et styles
+// Proxy pour charger les pages et corriger les liens/images
 app.get('/api/proxy', async (req, res) => {
   const targetUrl = req.query.url;
-  if (!targetUrl) {
-    console.log('[PROXY WARNING] URL manquante.');
-    return res.status(400).send('URL manquante');
-  }
+  if (!targetUrl) return res.status(400).send('URL manquante');
 
-  console.log(`[PROXY] Chargement de l'URL : ${targetUrl}`);
+  console.log(`[PROXY] Chargement de : ${targetUrl}`);
 
   try {
     const response = await axios.get(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
       responseType: 'text',
       timeout: 10000
@@ -78,7 +74,7 @@ app.get('/api/proxy', async (req, res) => {
     const urlObj = new URL(targetUrl);
     const origin = urlObj.origin;
 
-    // Injection de la balise <base> pour résoudre les liens et images relatifs
+    // Insertion de la balise <base> pour charger correctement les images et styles
     const baseTag = `<base href="${origin}/">`;
     if (html.includes('<head>')) {
       html = html.replace('<head>', `<head>${baseTag}`);
@@ -89,13 +85,13 @@ app.get('/api/proxy', async (req, res) => {
     res.removeHeader('X-Frame-Options');
     res.removeHeader('Content-Security-Policy');
     res.send(html);
-    console.log(`[PROXY SUCCESS] Page envoyée avec succès : ${targetUrl}`);
+    console.log(`[PROXY SUCCESS] Page envoyée : ${targetUrl}`);
   } catch (err) {
-    console.error(`[PROXY ERROR] Échec sur ${targetUrl} : ${err.message}`);
+    console.error(`[PROXY ERROR] ${err.message}`);
     res.status(500).send(`Impossible de charger la page : ${err.message}`);
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`[SERVER] Serveur SAFARI + démarré sur le port ${PORT}`);
+  console.log(`[SERVEUR] SAFARI + démarré sur le port ${PORT}`);
 });
