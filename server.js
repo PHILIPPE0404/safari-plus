@@ -14,7 +14,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Moteur de recherche côté serveur
+// Moteur de recherche optimisé via DuckDuckGo Lite (POST)
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) {
@@ -25,22 +25,26 @@ app.get('/api/search', async (req, res) => {
   console.log(`[RECHERCHE] Lancement pour : "${query}"`);
 
   try {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const response = await axios.get(url, {
+    const params = new URLSearchParams();
+    params.append('q', query);
+
+    const response = await axios.post('https://lite.duckduckgo.com/lite/', params.toString(), {
       headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       },
-      timeout: 10000
+      timeout: 12000
     });
 
     const $ = cheerio.load(response.data);
     const results = [];
 
-    $('.result').each((i, element) => {
-      const title = $(element).find('.result__title a').text().trim();
-      // ✅ CORRECT
-      const link = $(element).find('.result__url').attr('href') || $(element).find('.result__title a').attr('href');
-      const snippet = $(element).find('.result__snippet').text().trim();
+    $('.result-snippet').each((i, element) => {
+      const snippet = $(element).text().trim();
+      const tr = $(element).closest('tr').prev();
+      const a = tr.find('a.result-link');
+      const title = a.text().trim();
+      const link = a.attr('href');
 
       if (title && link) {
         results.push({ title, link, snippet });
@@ -51,11 +55,11 @@ app.get('/api/search', async (req, res) => {
     res.json({ results });
   } catch (error) {
     console.error(`[RECHERCHE ERROR] ${error.message}`);
-    res.status(500).json({ error: 'Erreur lors de la recherche', details: error.message });
+    res.status(500).json({ error: 'Le serveur de recherche n\'a pas répondu à temps.', details: error.message });
   }
 });
 
-// Proxy pour charger les pages et corriger les liens/images
+// Proxy pour afficher la page dans l'iframe
 app.get('/api/proxy', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('URL manquante');
@@ -68,14 +72,13 @@ app.get('/api/proxy', async (req, res) => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
       responseType: 'text',
-      timeout: 10000
+      timeout: 12000
     });
 
     let html = response.data;
     const urlObj = new URL(targetUrl);
     const origin = urlObj.origin;
 
-    // Insertion de la balise <base> pour charger correctement les images et styles
     const baseTag = `<base href="${origin}/">`;
     if (html.includes('<head>')) {
       html = html.replace('<head>', `<head>${baseTag}`);
