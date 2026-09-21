@@ -12,19 +12,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// Recherche via l'API JSON de SearXNG (agrégateur Google/Bing insensible aux blocages cloud)
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: 'Recherche vide' });
 
   console.log(`[RECHERCHE] Lancement pour : "${query}"`);
 
-  // Liste d'instances publiques SearXNG pour basculer automatiquement en cas de lenteur
+  // Liste d'instances SearXNG publiques vérifiées
   const instances = [
+    'https://paulgo.io/search',
+    'https://searx.priv.at/search',
     'https://searx.be/search',
-    'https://search.bus-hit.me/search',
-    'https://searx.space/search',
-    'https://searx.fyi/search'
+    'https://searx.tiekoetter.com/search'
   ];
 
   for (const instance of instances) {
@@ -48,7 +47,7 @@ app.get('/api/search', async (req, res) => {
           snippet: item.content || 'Aucune description disponible.'
         }));
 
-        console.log(`[RECHERCHE SUCCESS] ${results.length} résultats récupérés via ${instance}`);
+        console.log(`[RECHERCHE SUCCESS] ${results.length} résultats trouvés via ${instance}`);
         return res.json({ results });
       }
     } catch (err) {
@@ -56,11 +55,39 @@ app.get('/api/search', async (req, res) => {
     }
   }
 
-  console.error('[RECHERCHE ERROR] Toutes les instances de recherche ont expiré.');
-  res.status(500).json({ error: 'Impossible d\'obtenir les résultats de recherche.' });
+  // Solution de secours : Recherche Wikipédia si SearXNG ne répond pas
+  try {
+    console.log('[RECHERCHE INFO] Utilisation du système de secours Wikipédia...');
+    const wikiRes = await axios.get('https://fr.wikipedia.org/w/api.php', {
+      params: {
+        action: 'query',
+        list: 'search',
+        srsearch: query,
+        format: 'json',
+        origin: '*'
+      },
+      timeout: 4000
+    });
+
+    if (wikiRes.data && wikiRes.data.query && wikiRes.data.query.search) {
+      const wikiResults = wikiRes.data.query.search.slice(0, 10).map(item => ({
+        title: item.title,
+        link: `https://fr.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
+        snippet: item.snippet.replace(/<[^>]*>?/gm, '')
+      }));
+
+      if (wikiResults.length > 0) {
+        console.log(`[RECHERCHE SUCCESS] ${wikiResults.length} résultats récupérés via Wikipédia API`);
+        return res.json({ results: wikiResults });
+      }
+    }
+  } catch (wikiErr) {
+    console.error(`[RECHERCHE ERROR] Secours Wikipédia indisponible : ${wikiErr.message}`);
+  }
+
+  res.status(500).json({ error: 'Impossible de récupérer les résultats pour le moment.' });
 });
 
-// Proxy pour afficher les pages web dans l'iframe
 app.get('/api/proxy', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('URL manquante');
