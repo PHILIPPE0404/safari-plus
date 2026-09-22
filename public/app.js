@@ -6,6 +6,15 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Capture toutes les erreurs fatales non gérées pour les afficher dans les logs Render
+process.on('uncaughtException', (err) => {
+  console.error('[CRASH ERREUR NON CAPTURÉE]', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRASH PROMESSE REJETÉE]', reason);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use((req, res, next) => {
@@ -39,40 +48,49 @@ app.get('/api/search', async (req, res) => {
   res.status(500).json({ error: 'Aucun résultat.' });
 });
 
-// 2. Le Proxy principal (http-proxy-middleware)
+// 2. Proxy principal (avec target obligatoire et logs debug)
 app.use('/api/proxy', createProxyMiddleware({
+  target: 'https://www.google.com', // Cible par défaut indispensable pour éviter le crash
+  changeOrigin: true,
+  logLevel: 'debug', // Force l'affichage des logs du proxy sur Render
+  ws: true,
+  secure: false,
   router: (req) => {
     const target = req.query.url;
-    if (!target) return 'http://localhost:3000';
+    if (!target) return 'https://www.google.com';
     try {
-      return new URL(target).origin;
+      const formattedUrl = target.startsWith('http') ? target : 'https://' + target;
+      return new URL(formattedUrl).origin;
     } catch (err) {
-      return 'http://localhost:3000';
+      console.error('[ROUTER ERREUR]', err.message);
+      return 'https://www.google.com';
     }
   },
-  pathRewrite: (path, req) => {
+  pathRewrite: (pathStr, req) => {
     const target = req.query.url;
-    if (!target) return path;
+    if (!target) return pathStr;
     try {
-      const urlObj = new URL(target);
+      const formattedUrl = target.startsWith('http') ? target : 'https://' + target;
+      const urlObj = new URL(formattedUrl);
       return urlObj.pathname + urlObj.search;
     } catch (err) {
-      return path;
+      return pathStr;
     }
   },
-  changeOrigin: true,
-  ws: true, // Active les WebSockets (indispensable pour les jeux interactifs)
-  secure: false,
   onProxyRes: (proxyRes, req, res) => {
-    // Fait sauter toutes les sécurités qui bloquent l'affichage et les images
     delete proxyRes.headers['x-frame-options'];
     delete proxyRes.headers['content-security-policy'];
     proxyRes.headers['access-control-allow-origin'] = '*';
+  },
+  onError: (err, req, res) => {
+    console.error('[PROXY ERREUR HARDFALL]', err.message);
+    if (!res.headersSent) {
+      res.status(500).send('Erreur lors du chargement de la page : ' + err.message);
+    }
   }
 }));
 
-// 3. Filet de sécurité (Catch-all) pour les images orphelines
-// Intercepte les images appelées directement par la racine (ex: /logo.png) et les redirige vers le bon site
+// 3. Catch-all pour intercepter les images appelées en chemin relatif
 app.use((req, res, next) => {
   const referer = req.headers.referer || '';
   
@@ -80,7 +98,9 @@ app.use((req, res, next) => {
     const match = referer.match(/url=([^&]+)/);
     if (match && match[1]) {
       try {
-        const targetOrigin = new URL(decodeURIComponent(match[1])).origin;
+        const decodedUrl = decodeURIComponent(match[1]);
+        const formattedUrl = decodedUrl.startsWith('http') ? decodedUrl : 'https://' + decodedUrl;
+        const targetOrigin = new URL(formattedUrl).origin;
         
         return createProxyMiddleware({
           target: targetOrigin,
@@ -94,7 +114,7 @@ app.use((req, res, next) => {
           onError: (err, req, res) => res.status(404).end()
         })(req, res, next);
       } catch (e) {
-        // Ignore l'erreur et passe au middleware suivant
+        console.error('[CATCH-ALL ERREUR]', e.message);
       }
     }
   }
@@ -102,5 +122,5 @@ app.use((req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[SERVEUR] SAFARI + démarré sur le port ${PORT}`);
+  console.log(`[SERVEUR] SAFARI + démarré avec succès sur le port ${PORT}`);
 });
