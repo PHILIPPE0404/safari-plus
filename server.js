@@ -19,7 +19,7 @@ app.get('/api/search', async (req, res) => {
 
   console.log('[RECHERCHE] Lancement pour : "' + query + '"');
 
-  // 1. Wikipédia avec User-Agent valide
+  // 1. Wikipédia FR
   try {
     const wikiRes = await axios.get('https://fr.wikipedia.org/w/api.php', {
       params: {
@@ -49,7 +49,7 @@ app.get('/api/search', async (req, res) => {
     console.log('[RECHERCHE WARNING] Wikipédia indisponible : ' + wikiErr.message);
   }
 
-  // 2. Instances SearXNG publiques de secours
+  // 2. Instances SearXNG de secours
   const instances = [
     'https://searx.be/search',
     'https://searx.ebinar.me/search',
@@ -82,7 +82,7 @@ app.get('/api/search', async (req, res) => {
   res.status(500).json({ error: 'Aucun résultat trouvé.' });
 });
 
-// Proxy web optimisé
+// Proxy web : images & redirection des liens dans Safari +
 app.get('/api/proxy', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('URL manquante');
@@ -92,26 +92,39 @@ app.get('/api/proxy', async (req, res) => {
   try {
     const response = await axios.get(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
       },
       responseType: 'text',
       timeout: 10000
     });
 
     let html = response.data;
-    const urlObj = new URL(targetUrl);
-    const origin = urlObj.origin;
 
-    const injected = '<base href="' + origin + '/"><meta name="referrer" content="no-referrer">';
+    // Scripts & balises injectés dans la page web chargée
+    const injectedCode = `
+      <base href="${targetUrl}">
+      <meta name="referrer" content="no-referrer">
+      <script>
+        document.addEventListener('click', function(e) {
+          const anchor = e.target.closest('a');
+          if (anchor && anchor.href) {
+            e.preventDefault();
+            window.location.href = '/api/proxy?url=' + encodeURIComponent(anchor.href);
+          }
+        });
+      </script>
+    `;
 
     if (html.includes('<head>')) {
-      html = html.replace('<head>', '<head>' + injected);
+      html = html.replace('<head>', '<head>' + injectedCode);
     } else {
-      html = injected + html;
+      html = injectedCode + html;
     }
 
     res.removeHeader('X-Frame-Options');
     res.removeHeader('Content-Security-Policy');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
     console.log('[PROXY SUCCESS] Page envoyée : ' + targetUrl);
   } catch (err) {
