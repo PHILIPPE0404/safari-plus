@@ -12,15 +12,7 @@ app.use((req, res, next) => {
   next();
 });
 
-function resolveUrl(relativeUrl, baseUrl) {
-  try {
-    return new URL(relativeUrl, baseUrl).href;
-  } catch (e) {
-    return relativeUrl;
-  }
-}
-
-// 1. Recherche Wikipédia
+// 1. Route de recherche Wikipédia
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: 'Recherche vide' });
@@ -51,127 +43,89 @@ app.get('/api/search', async (req, res) => {
   res.status(500).json({ error: 'Aucun résultat trouvé.' });
 });
 
-// Moteur de requêtes Proxy
-async function fetchAndProxy(targetUrl, res) {
+// 2. Proxy Streaming (Transfert binaire direct des images)
+app.get('/api/proxy', async (req, res) => {
+  let targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).send('URL manquante');
+
+  if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+    targetUrl = 'https://' + targetUrl;
+  }
+
   try {
     const targetObj = new URL(targetUrl);
 
-    const response = await axios.get(targetUrl, {
+    const response = await axios({
+      method: 'get',
+      url: targetUrl,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': '*/*',
         'Referer': targetObj.origin + '/'
       },
-      responseType: 'arraybuffer',
+      responseType: 'stream',
       validateStatus: () => true,
       timeout: 12000
     });
 
     const contentType = response.headers['content-type'] || '';
 
+    // Déblocage des sécurités d'affichage
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.removeHeader('X-Frame-Options');
     res.removeHeader('Content-Security-Policy');
     res.removeHeader('Content-Security-Policy-Report-Only');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Content-Type', contentType);
 
-    // Traitement CSS
-    if (contentType.includes('text/css')) {
-      let css = response.data.toString('utf-8');
-      css = css.replace(/url\((['"]?)(.*?)\1\)/gi, (match, quote, url) => {
-        if (!url || url.startsWith('data:')) return match;
-        const absolute = resolveUrl(url, targetUrl);
-        return 'url("/api/proxy?url=' + encodeURIComponent(absolute) + '")';
-      });
-      return res.send(css);
-    }
-
-    // Traitement HTML
+    // Traitement uniquement pour le HTML
     if (contentType.includes('text/html')) {
-      let html = response.data.toString('utf-8');
+      let chunks = [];
+      response.data.on('data', chunk => chunks.push(chunk));
+      response.data.on('end', () => {
+        let html = Buffer.concat(chunks).toString('utf-8');
 
-      // Réécriture des attributs href, src, action
-      html = html.replace(/(href|src|action)=(['"])(.*?)\2/gi, (match, attr, quote, url) => {
-        if (!url || url.startsWith('data:') || url.startsWith('#') || url.startsWith('javascript:')) {
-          return match;
-        }
-        const absolute = resolveUrl(url, targetUrl);
-        return attr + '=' + quote + '/api/proxy?url=' + encodeURIComponent(absolute) + quote;
-      });
-
-      // Réécriture de srcset (images adaptatives)
-      html = html.replace(/srcset=(['"])(.*?)\1/gi, (match, quote, srcset) => {
-        const newSet = srcset.split(',').map(part => {
-          const trimmed = part.trim().split(/\s+/);
-          if (trimmed[0] && !trimmed[0].startsWith('data:')) {
-            trimmed[0] = '/api/proxy?url=' + encodeURIComponent(resolveUrl(trimmed[0], targetUrl));
-          }
-          return trimmed.join(' ');
-        }).join(', ');
-        return 'srcset=' + quote + newSet + quote;
-      });
-
-      // Script JS d'interception globale
-      const injected = `
-        <base href="${targetObj.origin}/">
-        <meta name="referrer" content="no-referrer">
-        <script>
-          (function() {
-            const TARGET_URL = "${targetUrl}";
-            function toProxy(u) {
-              try {
-                const abs = new URL(u, TARGET_URL).href;
-                return '/api/proxy?url=' + encodeURIComponent(abs);
-              } catch(e) { return u; }
-            }
-            const origFetch = window.fetch;
-            window.fetch = function(r, i) {
-              if (typeof r === 'string' && !r.startsWith('data:') && !r.startsWith('/api/proxy')) r = toProxy(r);
-              return origFetch.call(this, r, i);
-            };
-            const origXHR = window.XMLHttpRequest.prototype.open;
-            window.XMLHttpRequest.prototype.open = function(m, u, ...a) {
-              if (typeof u === 'string' && !u.startsWith('data:') && !u.startsWith('/api/proxy')) u = toProxy(u);
-              return origXHR.call(this, m, u, ...a);
-            };
-            document.addEventListener('click', function(e) {
-              const a = e.target.closest('a');
-              if (a && a.href && !a.href.startsWith('javascript:') && !a.href.includes('/api/proxy')) {
-                e.preventDefault();
-                window.location.href = toProxy(a.href);
+        const injected = `
+          <base href="${targetObj.origin}/">
+          <meta name="referrer" content="no-referrer">
+          <script>
+            (function() {
+              const TARGET = "${targetUrl}";
+              function toProxy(u) {
+                try {
+                  const abs = new URL(u, TARGET).href;
+                  return '/api/proxy?url=' + encodeURIComponent(abs);
+                } catch(e) { return u; }
               }
-            }, true);
-          })();
-        </script>
-      `;
+              document.addEventListener('click', function(e) {
+                const a = e.target.closest('a');
+                if (a && a.href && !a.href.startsWith('javascript:') && !a.href.includes('/api/proxy')) {
+                  e.preventDefault();
+                  window.location.href = toProxy(a.href);
+                }
+              }, true);
+            })();
+          </script>
+        `;
 
-      if (html.includes('<head>')) {
-        html = html.replace('<head>', '<head>' + injected);
-      } else {
-        html = injected + html;
-      }
-      return res.send(html);
+        if (html.includes('<head>')) {
+          html = html.replace('<head>', '<head>' + injected);
+        } else {
+          html = injected + html;
+        }
+        res.send(html);
+      });
+      return;
     }
 
-    // Images / Fichiers binaires / JS
-    return res.send(Buffer.from(response.data));
+    // Pour TOUTES les images (PNG, WebP, SVG, JPG) et assets : envoi en flux direct
+    response.data.pipe(res);
 
   } catch (err) {
-    res.status(500).send('Erreur lors du chargement : ' + err.message);
+    res.status(500).send('Erreur proxy : ' + err.message);
   }
-}
-
-// 2. Route officielle Proxy
-app.get('/api/proxy', async (req, res) => {
-  let targetUrl = req.query.url;
-  if (!targetUrl) return res.status(400).send('URL manquante');
-  if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-    targetUrl = 'https://' + targetUrl;
-  }
-  await fetchAndProxy(targetUrl, res);
 });
 
-// 3. Catch-All pour intercepter les images relatives ratées par le HTML
+// 3. Intercepteur pour les images relatives appelées directement par la page
 app.use(async (req, res, next) => {
   const referer = req.headers['referer'] || '';
   if (referer.includes('/api/proxy?url=')) {
@@ -181,8 +135,21 @@ app.use(async (req, res, next) => {
         const parentUrl = decodeURIComponent(match[1]);
         const parentObj = new URL(parentUrl);
         const missingAssetUrl = parentObj.origin + req.originalUrl;
-        console.log('[PROXY RECAPTURE] Récupération de : ' + missingAssetUrl);
-        return await fetchAndProxy(missingAssetUrl, res);
+
+        const streamRes = await axios({
+          method: 'get',
+          url: missingAssetUrl,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': parentObj.origin + '/'
+          },
+          responseType: 'stream',
+          validateStatus: () => true
+        });
+
+        res.setHeader('Content-Type', streamRes.headers['content-type'] || 'image/png');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return streamRes.data.pipe(res);
       }
     } catch (e) {}
   }
