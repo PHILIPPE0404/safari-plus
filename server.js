@@ -7,12 +7,13 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Log simple des requêtes
 app.use((req, res, next) => {
-  console.log('[LOG] ' + new Date().toLocaleTimeString() + ' - ' + req.method + ' ' + req.url);
+  console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${req.method} ${req.url}`);
   next();
 });
 
-// 1. Route de recherche Wikipédia
+// 1. Recherche Wikipédia
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: 'Recherche vide' });
@@ -30,7 +31,7 @@ app.get('/api/search', async (req, res) => {
       timeout: 5000
     });
 
-    if (wikiRes.data && wikiRes.data.query && wikiRes.data.query.search.length > 0) {
+    if (wikiRes.data && wikiRes.data.query && wikiRes.data.query.search) {
       const results = wikiRes.data.query.search.slice(0, 10).map(item => ({
         title: item.title,
         link: 'https://fr.wikipedia.org/wiki/' + encodeURIComponent(item.title),
@@ -38,12 +39,13 @@ app.get('/api/search', async (req, res) => {
       }));
       return res.json({ results });
     }
-  } catch (err) {}
-
+  } catch (err) {
+    console.error('[ERREUR RECHERCHE]', err.message);
+  }
   res.status(500).json({ error: 'Aucun résultat trouvé.' });
 });
 
-// 2. Proxy Streaming (Transfert binaire direct des images)
+// 2. Proxy Web complet
 app.get('/api/proxy', async (req, res) => {
   let targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('URL manquante');
@@ -53,109 +55,65 @@ app.get('/api/proxy', async (req, res) => {
   }
 
   try {
-    const targetObj = new URL(targetUrl);
+    const parsedUrl = new URL(targetUrl);
 
     const response = await axios({
       method: 'get',
       url: targetUrl,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         'Accept': '*/*',
-        'Referer': targetObj.origin + '/'
+        'Referer': parsedUrl.origin + '/'
       },
-      responseType: 'stream',
+      responseType: 'arraybuffer',
       validateStatus: () => true,
-      timeout: 12000
+      timeout: 10000
     });
 
-    const contentType = response.headers['content-type'] || '';
+    const contentType = response.headers['content-type'] || 'text/html';
 
-    // Déblocage des sécurités d'affichage
+    // Déblocage des protections d'affichage
     res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.removeHeader('X-Frame-Options');
     res.removeHeader('Content-Security-Policy');
-    res.removeHeader('Content-Security-Policy-Report-Only');
 
-    // Traitement uniquement pour le HTML
+    // Traitement des pages HTML
     if (contentType.includes('text/html')) {
-      let chunks = [];
-      response.data.on('data', chunk => chunks.push(chunk));
-      response.data.on('end', () => {
-        let html = Buffer.concat(chunks).toString('utf-8');
+      let html = response.data.toString('utf-8');
 
-        const injected = `
-          <base href="${targetObj.origin}/">
-          <meta name="referrer" content="no-referrer">
-          <script>
-            (function() {
-              const TARGET = "${targetUrl}";
-              function toProxy(u) {
-                try {
-                  const abs = new URL(u, TARGET).href;
-                  return '/api/proxy?url=' + encodeURIComponent(abs);
-                } catch(e) { return u; }
-              }
-              document.addEventListener('click', function(e) {
-                const a = e.target.closest('a');
-                if (a && a.href && !a.href.startsWith('javascript:') && !a.href.includes('/api/proxy')) {
-                  e.preventDefault();
-                  window.location.href = toProxy(a.href);
-                }
-              }, true);
-            })();
-          </script>
-        `;
+      const injectedScript = `
+        <base href="${parsedUrl.origin}/">
+        <meta name="referrer" content="no-referrer">
+        <script>
+          document.addEventListener('click', function(e) {
+            const a = e.target.closest('a');
+            if (a && a.href && !a.href.startsWith('javascript:')) {
+              e.preventDefault();
+              window.location.href = '/api/proxy?url=' + encodeURIComponent(a.href);
+            }
+          }, true);
+        </script>
+      `;
 
-        if (html.includes('<head>')) {
-          html = html.replace('<head>', '<head>' + injected);
-        } else {
-          html = injected + html;
-        }
-        res.send(html);
-      });
-      return;
+      if (html.includes('<head>')) {
+        html = html.replace('<head>', '<head>' + injectedScript);
+      } else {
+        html = injectedScript + html;
+      }
+
+      return res.send(html);
     }
 
-    // Pour TOUTES les images (PNG, WebP, SVG, JPG) et assets : envoi en flux direct
-    response.data.pipe(res);
+    // Renvoi des images, scripts et styles en binaire brut
+    return res.send(Buffer.from(response.data));
 
   } catch (err) {
-    res.status(500).send('Erreur proxy : ' + err.message);
+    console.error('[ERREUR PROXY]', err.message);
+    return res.status(500).send('Erreur lors du chargement de la page : ' + err.message);
   }
-});
-
-// 3. Intercepteur pour les images relatives appelées directement par la page
-app.use(async (req, res, next) => {
-  const referer = req.headers['referer'] || '';
-  if (referer.includes('/api/proxy?url=')) {
-    try {
-      const match = referer.match(/url=([^&]+)/);
-      if (match && match[1]) {
-        const parentUrl = decodeURIComponent(match[1]);
-        const parentObj = new URL(parentUrl);
-        const missingAssetUrl = parentObj.origin + req.originalUrl;
-
-        const streamRes = await axios({
-          method: 'get',
-          url: missingAssetUrl,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': parentObj.origin + '/'
-          },
-          responseType: 'stream',
-          validateStatus: () => true
-        });
-
-        res.setHeader('Content-Type', streamRes.headers['content-type'] || 'image/png');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        return streamRes.data.pipe(res);
-      }
-    } catch (e) {}
-  }
-  next();
 });
 
 app.listen(PORT, () => {
-  console.log('[SERVEUR] SAFARI + démarré sur le port ' + PORT);
+  console.log('[SERVEUR] Safari+ démarré sur le port ' + PORT);
 });
