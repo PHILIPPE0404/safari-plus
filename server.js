@@ -82,7 +82,7 @@ app.get('/api/search', async (req, res) => {
   res.status(500).json({ error: 'Aucun résultat trouvé.' });
 });
 
-// Proxy web : images & redirection des liens dans Safari +
+// Proxy universel : images, scripts, CSS et navigation dans Safari +
 app.get('/api/proxy', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('URL manquante');
@@ -93,43 +93,52 @@ app.get('/api/proxy', async (req, res) => {
     const response = await axios.get(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        'Accept': '*/*'
       },
-      responseType: 'text',
+      responseType: 'arraybuffer', // Permet de recevoir du binaire (images) ou du texte (HTML/CSS)
       timeout: 10000
     });
 
-    let html = response.data;
-
-    // Scripts & balises injectés dans la page web chargée
-    const injectedCode = `
-      <base href="${targetUrl}">
-      <meta name="referrer" content="no-referrer">
-      <script>
-        document.addEventListener('click', function(e) {
-          const anchor = e.target.closest('a');
-          if (anchor && anchor.href) {
-            e.preventDefault();
-            window.location.href = '/api/proxy?url=' + encodeURIComponent(anchor.href);
-          }
-        });
-      </script>
-    `;
-
-    if (html.includes('<head>')) {
-      html = html.replace('<head>', '<head>' + injectedCode);
-    } else {
-      html = injectedCode + html;
-    }
+    const contentType = response.headers['content-type'] || '';
 
     res.removeHeader('X-Frame-Options');
     res.removeHeader('Content-Security-Policy');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
-    console.log('[PROXY SUCCESS] Page envoyée : ' + targetUrl);
+    res.setHeader('Content-Type', contentType);
+
+    // Traitement spécifique pour les pages HTML
+    if (contentType.includes('text/html')) {
+      let html = response.data.toString('utf-8');
+
+      const injectedCode = `
+        <base href="${targetUrl}">
+        <meta name="referrer" content="no-referrer">
+        <script>
+          document.addEventListener('click', function(e) {
+            const anchor = e.target.closest('a');
+            if (anchor && anchor.href && !anchor.href.startsWith('javascript:')) {
+              e.preventDefault();
+              window.location.href = '/api/proxy?url=' + encodeURIComponent(anchor.href);
+            }
+          });
+        </script>
+      `;
+
+      if (html.includes('<head>')) {
+        html = html.replace('<head>', '<head>' + injectedCode);
+      } else {
+        html = injectedCode + html;
+      }
+
+      return res.send(html);
+    }
+
+    // Renvoi direct du buffer pour les images, polices, scripts, etc.
+    res.send(Buffer.from(response.data));
+    console.log('[PROXY SUCCESS] Fichier/Page envoyé : ' + targetUrl);
+
   } catch (err) {
     console.error('[PROXY ERROR] ' + err.message);
-    res.status(500).send('Impossible de charger la page : ' + err.message);
+    res.status(500).send('Impossible de charger la ressource : ' + err.message);
   }
 });
 
