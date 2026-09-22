@@ -1,81 +1,106 @@
-const form = document.getElementById('search-form');
-const input = document.getElementById('search-input');
-const loader = document.getElementById('loader');
-const progressBar = document.getElementById('progress-bar');
-const resultsContainer = document.getElementById('results');
-const iframe = document.getElementById('web-frame');
+const express = require('express');
+const axios = require('axios');
+const path = require('path');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
-function setProgress(percent) {
-  progressBar.style.width = percent + '%';
-  if (percent === 100) {
-    setTimeout(() => {
-      progressBar.style.width = '0%';
-    }, 300);
-  }
-}
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-function startLoading() {
-  loader.classList.remove('hidden');
-  setProgress(20);
-  let progress = 20;
-  window.loadingInterval = setInterval(() => {
-    if (progress < 85) {
-      progress += Math.random() * 10;
-      setProgress(progress);
-    }
-  }, 200);
-}
+app.use(express.static(path.join(__dirname, 'public')));
 
-function stopLoading() {
-  clearInterval(window.loadingInterval);
-  setProgress(100);
-  loader.classList.add('hidden');
-}
+app.use((req, res, next) => {
+  console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${req.method} ${req.url}`);
+  next();
+});
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const query = input.value.trim();
-  if (!query) return;
+// 1. Recherche Wikipédia
+app.get('/api/search', async (req, res) => {
+  const query = req.query.q;
+  if (!query) return res.status(400).json({ error: 'Recherche vide' });
 
-  startLoading();
-  resultsContainer.innerHTML = '';
-  iframe.classList.add('hidden');
-  resultsContainer.classList.remove('hidden');
-
-  // Vérifie si la saisie est une URL directe
-  if (query.startsWith('http://') || query.startsWith('https://')) {
-    iframe.src = `/api/proxy?url=${encodeURIComponent(query)}`;
-    iframe.onload = () => {
-      iframe.classList.remove('hidden');
-      resultsContainer.classList.add('hidden');
-      stopLoading();
-    };
-    return;
-  }
-
-  // Sinon, exécute la recherche
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-    const data = await res.json();
-    
-    stopLoading();
-
-    if (!data.results || data.results.length === 0) {
-      resultsContainer.innerHTML = '<p>Aucun résultat trouvé.</p>';
-      return;
-    }
-
-    data.results.forEach(item => {
-      const card = document.createElement('div');
-      card.className = 'result-card';
-      card.innerHTML = `
-        <a href="${item.link}" target="_blank">${item.title}</a>
-        <p>${item.snippet}</p>
-      `;
-      resultsContainer.appendChild(card);
+    const wikiRes = await axios.get('https://fr.wikipedia.org/w/api.php', {
+      params: { action: 'query', list: 'search', srsearch: query, format: 'json', origin: '*' },
+      headers: { 'User-Agent': 'SafariPlusApp/2.0' },
+      timeout: 5000
     });
+
+    if (wikiRes.data?.query?.search?.length > 0) {
+      const results = wikiRes.data.query.search.slice(0, 10).map(item => ({
+        title: item.title,
+        link: 'https://fr.wikipedia.org/wiki/' + encodeURIComponent(item.title),
+        snippet: item.snippet.replace(/<[^>]*>?/gm, '')
+      }));
+      return res.json({ results });
+    }
   } catch (err) {
-    stopLoading();
-    resultsContainer.innerHTML = '<p>Erreur lors du chargement des résultats.</p>';
+    console.log('[WIKI ERREUR] ' + err.message);
   }
+  res.status(500).json({ error: 'Aucun résultat.' });
+});
+
+// 2. Le Proxy principal (http-proxy-middleware)
+app.use('/api/proxy', createProxyMiddleware({
+  router: (req) => {
+    const target = req.query.url;
+    if (!target) return 'http://localhost:3000';
+    try {
+      return new URL(target).origin;
+    } catch (err) {
+      return 'http://localhost:3000';
+    }
+  },
+  pathRewrite: (path, req) => {
+    const target = req.query.url;
+    if (!target) return path;
+    try {
+      const urlObj = new URL(target);
+      return urlObj.pathname + urlObj.search;
+    } catch (err) {
+      return path;
+    }
+  },
+  changeOrigin: true,
+  ws: true, // Active les WebSockets (indispensable pour les jeux interactifs)
+  secure: false,
+  onProxyRes: (proxyRes, req, res) => {
+    // Fait sauter toutes les sécurités qui bloquent l'affichage et les images
+    delete proxyRes.headers['x-frame-options'];
+    delete proxyRes.headers['content-security-policy'];
+    proxyRes.headers['access-control-allow-origin'] = '*';
+  }
+}));
+
+// 3. Filet de sécurité (Catch-all) pour les images orphelines
+// Intercepte les images appelées directement par la racine (ex: /logo.png) et les redirige vers le bon site
+app.use((req, res, next) => {
+  const referer = req.headers.referer || '';
+  
+  if (referer.includes('/api/proxy?url=')) {
+    const match = referer.match(/url=([^&]+)/);
+    if (match && match[1]) {
+      try {
+        const targetOrigin = new URL(decodeURIComponent(match[1])).origin;
+        
+        return createProxyMiddleware({
+          target: targetOrigin,
+          changeOrigin: true,
+          secure: false,
+          onProxyRes: (proxyRes) => {
+            delete proxyRes.headers['x-frame-options'];
+            delete proxyRes.headers['content-security-policy'];
+            proxyRes.headers['access-control-allow-origin'] = '*';
+          },
+          onError: (err, req, res) => res.status(404).end()
+        })(req, res, next);
+      } catch (e) {
+        // Ignore l'erreur et passe au middleware suivant
+      }
+    }
+  }
+  next();
+});
+
+app.listen(PORT, () => {
+  console.log(`[SERVEUR] SAFARI + démarré sur le port ${PORT}`);
 });
