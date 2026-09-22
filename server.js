@@ -8,56 +8,19 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use((req, res, next) => {
-  console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${req.method} ${req.url}`);
+  console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${req.method}${req.url}`);
   next();
 });
 
+// Route de recherche (Wikipédia + SearXNG)
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: 'Recherche vide' });
 
   console.log(`[RECHERCHE] Lancement pour : "${query}"`);
 
-  // Liste d'instances SearXNG publiques vérifiées
-  const instances = [
-    'https://paulgo.io/search',
-    'https://searx.priv.at/search',
-    'https://searx.be/search',
-    'https://searx.tiekoetter.com/search'
-  ];
-
-  for (const instance of instances) {
-    try {
-      const response = await axios.get(instance, {
-        params: {
-          q: query,
-          format: 'json',
-          language: 'fr-FR'
-        },
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        timeout: 4000
-      });
-
-      if (response.data && response.data.results && response.data.results.length > 0) {
-        const results = response.data.results.slice(0, 10).map(item => ({
-          title: item.title,
-          link: item.url,
-          snippet: item.content || 'Aucune description disponible.'
-        }));
-
-        console.log(`[RECHERCHE SUCCESS] ${results.length} résultats trouvés via ${instance}`);
-        return res.json({ results });
-      }
-    } catch (err) {
-      console.log(`[RECHERCHE WARNING] Instance ${instance} indisponible (${err.message}), tentative suivante...`);
-    }
-  }
-
-  // Solution de secours : Recherche Wikipédia si SearXNG ne répond pas
+  // 1. Wikipédia avec User-Agent valide (Résout l'erreur 403)
   try {
-    console.log('[RECHERCHE INFO] Utilisation du système de secours Wikipédia...');
     const wikiRes = await axios.get('https://fr.wikipedia.org/w/api.php', {
       params: {
         action: 'query',
@@ -66,28 +29,31 @@ app.get('/api/search', async (req, res) => {
         format: 'json',
         origin: '*'
       },
-      timeout: 4000
+      headers: {
+        'User-Agent': 'SafariPlusApp/1.0 (https://safari-plus.onrender.com; contact@safariplus.local)'
+      },
+      timeout: 5000
     });
 
-    if (wikiRes.data && wikiRes.data.query && wikiRes.data.query.search) {
+    if (wikiRes.data && wikiRes.data.query && wikiRes.data.query.search && wikiRes.data.query.search.length > 0) {
       const wikiResults = wikiRes.data.query.search.slice(0, 10).map(item => ({
         title: item.title,
-        link: `https://fr.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
-        snippet: item.snippet.replace(/<[^>]*>?/gm, '')
-      }));
-
-      if (wikiResults.length > 0) {
-        console.log(`[RECHERCHE SUCCESS] ${wikiResults.length} résultats récupérés via Wikipédia API`);
-        return res.json({ results: wikiResults });
-      }
+        link: `https://fr.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,         snippet: item.snippet.replace(/<[^>]*>?/gm, '')       }));        console.log(`[RECHERCHE SUCCESS] ${wikiResults.length} résultats récupérés via Wikipédia`);
+      return res.json({ results: wikiResults });
     }
   } catch (wikiErr) {
-    console.error(`[RECHERCHE ERROR] Secours Wikipédia indisponible : ${wikiErr.message}`);
+    console.log(`[RECHERCHE WARNING] Wikipédia indisponible : ${wikiErr.message}`);   }    // 2. Instances SearXNG de secours   const instances = [     'https://searx.be/search',     'https://searx.ebinar.me/search',     'https://searx.mrbits.it/search'   ];    for (const instance of instances) {     try {       const response = await axios.get(instance, {         params: { q: query, format: 'json', language: 'fr-FR' },         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },         timeout: 4000       });        if (response.data && response.data.results && response.data.results.length > 0) {         const results = response.data.results.slice(0, 10).map(item => ({           title: item.title,           link: item.url,           snippet: item.content \vert{}\vert{} 'Aucune description disponible.'         }));          console.log(`[RECHERCHE SUCCESS] ${results.length} résultats via ${instance}`);
+        return res.json({ results });
+      }
+    } catch (err) {
+      console.log(`[RECHERCHE WARNING] ${instance} indisponible :${err.message}`);
+    }
   }
 
   res.status(500).json({ error: 'Impossible de récupérer les résultats pour le moment.' });
 });
 
+// Proxy web optimisé (Résout le problème d'affichage des images)
 app.get('/api/proxy', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('URL manquante');
@@ -97,7 +63,7 @@ app.get('/api/proxy', async (req, res) => {
   try {
     const response = await axios.get(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       },
       responseType: 'text',
       timeout: 10000
@@ -107,11 +73,16 @@ app.get('/api/proxy', async (req, res) => {
     const urlObj = new URL(targetUrl);
     const origin = urlObj.origin;
 
-    const baseTag = `<base href="${origin}/">`;
+    // Contournement anti-hotlinking pour charger les images distantes
+    const injectedHead = `
+      <base href="${origin}/">
+      <meta name="referrer" content="no-referrer">
+    `;
+
     if (html.includes('<head>')) {
-      html = html.replace('<head>', `<head>${baseTag}`);
+      html = html.replace('<head>`, `<head>${injectedHead}`);
     } else {
-      html = baseTag + html;
+      html = injectedHead + html;
     }
 
     res.removeHeader('X-Frame-Options');
