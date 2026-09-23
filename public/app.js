@@ -1,126 +1,100 @@
-const express = require('express');
-const axios = require('axios');
-const path = require('path');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('search-form');
+  const input = document.getElementById('url-input');
+  const progressBar = document.getElementById('progress-bar');
+  const searchResults = document.getElementById('search-results');
+  const webView = document.getElementById('web-view');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Capture toutes les erreurs fatales non gérées pour les afficher dans les logs Render
-process.on('uncaughtException', (err) => {
-  console.error('[CRASH ERREUR NON CAPTURÉE]', err);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[CRASH PROMESSE REJETÉE]', reason);
-});
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.use((req, res, next) => {
-  console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${req.method} ${req.url}`);
-  next();
-});
-
-// 1. Recherche Wikipédia
-app.get('/api/search', async (req, res) => {
-  const query = req.query.q;
-  if (!query) return res.status(400).json({ error: 'Recherche vide' });
-
-  try {
-    const wikiRes = await axios.get('https://fr.wikipedia.org/w/api.php', {
-      params: { action: 'query', list: 'search', srsearch: query, format: 'json', origin: '*' },
-      headers: { 'User-Agent': 'SafariPlusApp/2.0' },
-      timeout: 5000
-    });
-
-    if (wikiRes.data?.query?.search?.length > 0) {
-      const results = wikiRes.data.query.search.slice(0, 10).map(item => ({
-        title: item.title,
-        link: 'https://fr.wikipedia.org/wiki/' + encodeURIComponent(item.title),
-        snippet: item.snippet.replace(/<[^>]*>?/gm, '')
-      }));
-      return res.json({ results });
-    }
-  } catch (err) {
-    console.log('[WIKI ERREUR] ' + err.message);
+  // Lancement de l'animation de chargement
+  function startLoading() {
+    progressBar.style.width = '0%';
+    progressBar.style.display = 'block';
+    setTimeout(() => { progressBar.style.width = '70%'; }, 50);
   }
-  res.status(500).json({ error: 'Aucun résultat.' });
-});
 
-// 2. Proxy principal (avec target obligatoire et logs debug)
-app.use('/api/proxy', createProxyMiddleware({
-  target: 'https://www.google.com', // Cible par défaut indispensable pour éviter le crash
-  changeOrigin: true,
-  logLevel: 'debug', // Force l'affichage des logs du proxy sur Render
-  ws: true,
-  secure: false,
-  router: (req) => {
-    const target = req.query.url;
-    if (!target) return 'https://www.google.com';
-    try {
-      const formattedUrl = target.startsWith('http') ? target : 'https://' + target;
-      return new URL(formattedUrl).origin;
-    } catch (err) {
-      console.error('[ROUTER ERREUR]', err.message);
-      return 'https://www.google.com';
-    }
-  },
-  pathRewrite: (pathStr, req) => {
-    const target = req.query.url;
-    if (!target) return pathStr;
-    try {
-      const formattedUrl = target.startsWith('http') ? target : 'https://' + target;
-      const urlObj = new URL(formattedUrl);
-      return urlObj.pathname + urlObj.search;
-    } catch (err) {
-      return pathStr;
-    }
-  },
-  onProxyRes: (proxyRes, req, res) => {
-    delete proxyRes.headers['x-frame-options'];
-    delete proxyRes.headers['content-security-policy'];
-    proxyRes.headers['access-control-allow-origin'] = '*';
-  },
-  onError: (err, req, res) => {
-    console.error('[PROXY ERREUR HARDFALL]', err.message);
-    if (!res.headersSent) {
-      res.status(500).send('Erreur lors du chargement de la page : ' + err.message);
-    }
+  // Fin de l'animation
+  function stopLoading() {
+    progressBar.style.width = '100%';
+    setTimeout(() => {
+      progressBar.style.display = 'none';
+      progressBar.style.width = '0%';
+    }, 300);
   }
-}));
 
-// 3. Catch-all pour intercepter les images appelées en chemin relatif
-app.use((req, res, next) => {
-  const referer = req.headers.referer || '';
-  
-  if (referer.includes('/api/proxy?url=')) {
-    const match = referer.match(/url=([^&]+)/);
-    if (match && match[1]) {
-      try {
-        const decodedUrl = decodeURIComponent(match[1]);
-        const formattedUrl = decodedUrl.startsWith('http') ? decodedUrl : 'https://' + decodedUrl;
-        const targetOrigin = new URL(formattedUrl).origin;
-        
-        return createProxyMiddleware({
-          target: targetOrigin,
-          changeOrigin: true,
-          secure: false,
-          onProxyRes: (proxyRes) => {
-            delete proxyRes.headers['x-frame-options'];
-            delete proxyRes.headers['content-security-policy'];
-            proxyRes.headers['access-control-allow-origin'] = '*';
-          },
-          onError: (err, req, res) => res.status(404).end()
-        })(req, res, next);
-      } catch (e) {
-        console.error('[CATCH-ALL ERREUR]', e.message);
+  // Détecte si la saisie est une URL ou une recherche
+  function isUrl(string) {
+    const trimmed = string.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return true;
+    if (trimmed.includes('.') && !trimmed.includes(' ')) return true;
+    return false;
+  }
+
+  // Ouvre une page web via le proxy
+  function loadProxyUrl(url) {
+    startLoading();
+    let fullUrl = url;
+    if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+      fullUrl = 'https://' + fullUrl;
+    }
+
+    searchResults.style.display = 'none';
+    webView.style.display = 'block';
+    webView.src = '/api/proxy?url=' + encodeURIComponent(fullUrl);
+
+    webView.onload = () => {
+      stopLoading();
+    };
+  }
+
+  // Lance une recherche Wikipédia / SearXNG
+  async function performSearch(query) {
+    startLoading();
+    webView.style.display = 'none';
+    searchResults.style.display = 'block';
+    searchResults.innerHTML = '<p class="loading-text">Recherche en cours...</p>';
+
+    try {
+      const res = await fetch('/api/search?q=' + encodeURIComponent(query));
+      const data = await res.json();
+      stopLoading();
+
+      if (data.results && data.results.length > 0) {
+        searchResults.innerHTML = data.results.map(item => `
+          <div class="result-card">
+            <h3><a href="#" class="proxy-link" data-url="${item.link}">${item.title}</a></h3>
+            <p class="result-url">${item.link}</p>
+            <p class="result-snippet">${item.snippet}</p>
+          </div>
+        `).join('');
+
+        // Écoute des clics sur les résultats de recherche
+        document.querySelectorAll('.proxy-link').forEach(link => {
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const targetUrl = link.getAttribute('data-url');
+            input.value = targetUrl;
+            loadProxyUrl(targetUrl);
+          });
+        });
+      } else {
+        searchResults.innerHTML = '<p>Aucun résultat trouvé.</p>';
       }
+    } catch (err) {
+      stopLoading();
+      searchResults.innerHTML = '<p>Erreur lors de la recherche.</p>';
     }
   }
-  next();
-});
 
-app.listen(PORT, () => {
-  console.log(`[SERVEUR] SAFARI + démarré avec succès sur le port ${PORT}`);
+  // Interception de l'envoi du formulaire (Touche Entrée ou Clic sur Go)
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const query = input.value.trim();
+    if (!query) return;
+
+    if (isUrl(query)) {
+      loadProxyUrl(query);
+    } else {
+      performSearch(query);
+    }
+  });
 });
