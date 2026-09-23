@@ -7,37 +7,26 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-  <div id="progress-container">
-    <div id="progress-bar"></div>
-  </div>
-
-  <header class="browser-header">
-    <div class="logo-title">
-      <span class="brand-text">SAFARI <span class="plus">+</span></span>
-    </div>
+  <header class="barre-navigation">
+    <div class="logo">SAFARI <span>+</span></div>
+    
     <form id="search-form">
-      <input type="text" id="search-input" placeholder="Rechercher sur le web ou entrer une URL..." required />
+      <input type="text" id="url-input" placeholder="Rechercher ou entrer une URL..." autocomplete="off">
       <button type="submit">Go</button>
     </form>
+    
+    <!-- Barre d'animation de chargement -->
+    <div id="progress-bar" class="progress-bar"></div>
   </header>
 
-  <!-- Overlay de chargement avec animation infinie -->
-  <div id="loader" class="hidden">
-    <div class="loader-content">
-      <div class="compass-logo">
-        <div class="needle"></div>
-      </div>
-      <h2 class="infinite-text">SAFARI +</h2>
-      <p>Chargement par le serveur...</p>
-    </div>
-  </div>
-
-  <main id="content">
-    <div id="results" class="results-container"></div>
-    <iframe id="web-frame" class="hidden"></iframe>
+  <main class="conteneur-principal">
+    <!-- Zone d'affichage des résultats de recherche -->
+    <div id="search-results" class="results-container"></div>
+    
+    <!-- Iframe d'affichage des pages web (Proxy) -->
+    <iframe id="web-view" src="about:blank" style="display: none;"></iframe>
   </main>
 
-  <script src="app.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
