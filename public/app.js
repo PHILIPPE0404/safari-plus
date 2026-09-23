@@ -1,18 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('search-form');
   const input = document.getElementById('url-input');
+  const goBtn = document.getElementById('go-btn');
   const progressBar = document.getElementById('progress-bar');
   const searchResults = document.getElementById('search-results');
   const webView = document.getElementById('web-view');
 
-  // Lancement de l'animation de chargement
   function startLoading() {
     progressBar.style.width = '0%';
     progressBar.style.display = 'block';
     setTimeout(() => { progressBar.style.width = '70%'; }, 50);
   }
 
-  // Fin de l'animation
   function stopLoading() {
     progressBar.style.width = '100%';
     setTimeout(() => {
@@ -21,7 +19,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 300);
   }
 
-  // Détecte si la saisie est une URL ou une recherche
   function isUrl(string) {
     const trimmed = string.trim();
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return true;
@@ -29,7 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return false;
   }
 
-  // Ouvre une page web via le proxy
   function loadProxyUrl(url) {
     startLoading();
     let fullUrl = url;
@@ -46,7 +42,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // Lance une recherche Wikipédia / SearXNG
   async function performSearch(query) {
     startLoading();
     webView.style.display = 'none';
@@ -67,7 +62,6 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         `).join('');
 
-        // Écoute des clics sur les résultats de recherche
         document.querySelectorAll('.proxy-link').forEach(link => {
           link.addEventListener('click', (e) => {
             e.preventDefault();
@@ -85,9 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Interception de l'envoi du formulaire (Touche Entrée ou Clic sur Go)
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
+  function handleAction() {
     const query = input.value.trim();
     if (!query) return;
 
@@ -95,6 +87,17 @@ document.addEventListener('DOMContentLoaded', () => {
       loadProxyUrl(query);
     } else {
       performSearch(query);
+    }
+  }
+
+  // Écouteur sur le bouton Go
+  goBtn.addEventListener('click', handleAction);
+
+  // Écouteur sur la touche Entrée
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAction();
     }
   });
 });
