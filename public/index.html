@@ -10,20 +10,16 @@
   <header class="barre-navigation">
     <div class="logo">SAFARI <span>+</span></div>
     
-    <form id="search-form">
+    <form id="search-form" onsubmit="return false;">
       <input type="text" id="url-input" placeholder="Rechercher ou entrer une URL..." autocomplete="off">
-      <button type="submit">Go</button>
+      <button type="button" id="go-btn">Go</button>
     </form>
     
-    <!-- Barre d'animation de chargement -->
     <div id="progress-bar" class="progress-bar"></div>
   </header>
 
   <main class="conteneur-principal">
-    <!-- Zone d'affichage des résultats de recherche -->
     <div id="search-results" class="results-container"></div>
-    
-    <!-- Iframe d'affichage des pages web (Proxy) -->
     <iframe id="web-view" src="about:blank" style="display: none;"></iframe>
   </main>
 
